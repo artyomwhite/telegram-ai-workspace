@@ -138,11 +138,6 @@ export class TelegramBotService {
       String(message.message_id),
     );
 
-    const connection = await this.prisma.telegramConnection.findUnique({
-      where: { telegramUserId },
-      include: { user: true },
-    });
-
     const cmd = command.toLowerCase().split('@')[0];
 
     switch (cmd) {
@@ -160,82 +155,81 @@ export class TelegramBotService {
           argText,
         );
         break;
-      case '/newtask':
-        if (!connection) {
+      default: {
+        const user = await this.resolveTelegramUser(telegramUserId, chatId);
+        if (!user) {
           await this.telegramApi.sendMessage(
             chatId,
             'Please connect your account first with /connect <email>',
           );
           return;
         }
-        await this.handleNewTask(chatId, connection.userId, argText);
-        break;
-      case '/tasks':
-        if (!connection) {
-          await this.telegramApi.sendMessage(
-            chatId,
-            'Please connect your account first with /connect <email>',
-          );
-          return;
+
+        switch (cmd) {
+          case '/newtask':
+            await this.handleNewTask(chatId, user, argText);
+            break;
+          case '/tasks':
+            await this.handleTasks(chatId, user.id);
+            break;
+          case '/remind':
+            await this.handleRemind(chatId, user.id, argText);
+            break;
+          case '/contact':
+            await this.handleContact(chatId, user.id, argText);
+            break;
+          case '/company':
+            await this.handleCompany(chatId, user.id, argText);
+            break;
+          case '/search':
+            await this.handleSearch(chatId, user.id, argText);
+            break;
+          case '/stats':
+            await this.handleStats(chatId, user.id);
+            break;
+          default:
+            await this.telegramApi.sendMessage(
+              chatId,
+              'Unknown command. Type /help for available commands.',
+            );
         }
-        await this.handleTasks(chatId, connection.userId);
-        break;
-      case '/remind':
-        if (!connection) {
-          await this.telegramApi.sendMessage(
-            chatId,
-            'Please connect your account first with /connect <email>',
-          );
-          return;
-        }
-        await this.handleRemind(chatId, connection.userId, argText);
-        break;
-      case '/contact':
-        if (!connection) {
-          await this.telegramApi.sendMessage(
-            chatId,
-            'Please connect your account first with /connect <email>',
-          );
-          return;
-        }
-        await this.handleContact(chatId, connection.userId, argText);
-        break;
-      case '/company':
-        if (!connection) {
-          await this.telegramApi.sendMessage(
-            chatId,
-            'Please connect your account first with /connect <email>',
-          );
-          return;
-        }
-        await this.handleCompany(chatId, connection.userId, argText);
-        break;
-      case '/search':
-        if (!connection) {
-          await this.telegramApi.sendMessage(
-            chatId,
-            'Please connect your account first with /connect <email>',
-          );
-          return;
-        }
-        await this.handleSearch(chatId, connection.userId, argText);
-        break;
-      case '/stats':
-        if (!connection) {
-          await this.telegramApi.sendMessage(
-            chatId,
-            'Please connect your account first with /connect <email>',
-          );
-          return;
-        }
-        await this.handleStats(chatId, connection.userId);
-        break;
-      default:
-        await this.telegramApi.sendMessage(
-          chatId,
-          'Unknown command. Type /help for available commands.',
-        );
+      }
     }
+  }
+
+  private async resolveTelegramUser(
+    telegramUserId: string,
+    chatId: string,
+  ): Promise<{ id: string; email: string; firstName: string; lastName: string } | null> {
+    let connection = await this.prisma.telegramConnection.findFirst({
+      where: {
+        isActive: true,
+        OR: [{ telegramUserId }, { chatId }],
+      },
+      include: { user: true },
+    });
+
+    if (!connection) {
+      return null;
+    }
+
+    if (connection.telegramUserId !== telegramUserId) {
+      connection = await this.prisma.telegramConnection.update({
+        where: { id: connection.id },
+        data: { telegramUserId, chatId },
+        include: { user: true },
+      });
+    } else if (connection.chatId !== chatId) {
+      connection = await this.prisma.telegramConnection.update({
+        where: { id: connection.id },
+        data: { chatId },
+        include: { user: true },
+      });
+    }
+
+    const user = connection.user;
+    this.logger.log(`Telegram user: ${user.id} (${user.email})`);
+    return user;
   }
 
   private async handleStart(
@@ -288,8 +282,10 @@ export class TelegramBotService {
       return;
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: normalizedEmail },
     });
 
     if (!user) {
@@ -337,13 +333,19 @@ export class TelegramBotService {
       `Telegram account connected (@${username ?? telegramUserId})`,
     );
 
+    this.logger.log(`Telegram user: ${user.id} (${user.email})`);
+
     await this.telegramApi.sendMessage(
       chatId,
       `✅ Connected to <b>${user.firstName} ${user.lastName}</b> (${user.email})`,
     );
   }
 
-  private async handleNewTask(chatId: string, userId: string, title: string) {
+  private async handleNewTask(
+    chatId: string,
+    user: { id: string; email: string },
+    title: string,
+  ) {
     if (!title) {
       await this.telegramApi.sendMessage(
         chatId,
@@ -352,7 +354,8 @@ export class TelegramBotService {
       return;
     }
 
-    const task = await this.tasksService.create(userId, {
+    this.logger.log(`Telegram user: ${user.id}`);
+    const task = await this.tasksService.create(user.id, {
       title,
       priority: TaskPriority.MEDIUM,
       status: TaskStatus.TODO,
@@ -360,7 +363,7 @@ export class TelegramBotService {
 
     await this.telegramApi.sendMessage(
       chatId,
-      `✅ Task created: <b>${task.title}</b>\nID: ${task.id}`,
+      `✅ Task created: <b>${task.title}</b>\nID: ${task.id}\nAccount: ${user.email}`,
     );
   }
 
@@ -522,8 +525,8 @@ export class TelegramBotService {
     content: string,
     telegramMessageId?: string,
   ) {
-    const connection = await this.prisma.telegramConnection.findUnique({
-      where: { telegramUserId },
+    const connection = await this.prisma.telegramConnection.findFirst({
+      where: { telegramUserId, isActive: true },
     });
     if (!connection) return;
 
