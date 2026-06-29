@@ -46,8 +46,14 @@ export default function TasksPage() {
         search: search || undefined,
         status: statusFilter || undefined,
       });
-      setTasks(res.data);
-      setTotalPages(res.meta.totalPages);
+      console.log('TASKS API RESPONSE:', res);
+      const items = Array.isArray(res) ? res : (res?.data ?? []);
+      setTasks(items);
+      setTotalPages(res?.meta?.totalPages ?? 1);
+    } catch (error) {
+      console.error('TASKS API ERROR:', error);
+      setTasks([]);
+      setTotalPages(1);
     } finally {
       setLoading(false);
     }
@@ -121,7 +127,7 @@ export default function TasksPage() {
       <Card>
         {loading ? (
           <LoadingSpinner />
-        ) : tasks.length === 0 ? (
+        ) : !Array.isArray(tasks) || tasks.length === 0 ? (
           <EmptyState title="No tasks yet" description="Create your first task to get started" />
         ) : (
           <div className="overflow-x-auto">

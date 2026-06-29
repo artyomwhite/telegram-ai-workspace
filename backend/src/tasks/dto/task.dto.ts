@@ -8,6 +8,7 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 
 export class CreateTaskDto {
   @ApiProperty()
@@ -50,6 +51,18 @@ export class CreateTaskDto {
 export class UpdateTaskDto extends PartialType(CreateTaskDto) {}
 
 export class TaskFilterDto {
+  @ApiPropertyOptional({ enum: TaskStatus })
+  @IsOptional()
+  @IsEnum(TaskStatus)
+  status?: TaskStatus;
+
+  @ApiPropertyOptional({ enum: TaskPriority })
+  @IsOptional()
+  @IsEnum(TaskPriority)
+  priority?: TaskPriority;
+}
+
+export class TasksQueryDto extends PaginationDto {
   @ApiPropertyOptional({ enum: TaskStatus })
   @IsOptional()
   @IsEnum(TaskStatus)

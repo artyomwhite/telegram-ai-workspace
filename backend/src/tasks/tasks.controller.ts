@@ -11,9 +11,9 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PaginationDto, paginate } from '../common/dto/pagination.dto';
+import { paginate } from '../common/dto/pagination.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { CreateTaskDto, TaskFilterDto, UpdateTaskDto } from './dto/task.dto';
+import { CreateTaskDto, TasksQueryDto, UpdateTaskDto } from './dto/task.dto';
 import { TasksService } from './tasks.service';
 
 @ApiTags('Tasks')
@@ -31,7 +31,7 @@ export class TasksController {
   @Get()
   async findAll(
     @CurrentUser() user: { id: string },
-    @Query() query: PaginationDto & TaskFilterDto,
+    @Query() query: TasksQueryDto,
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;

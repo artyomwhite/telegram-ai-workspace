@@ -58,7 +58,11 @@ async function request<T>(
     (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers,
+    cache: 'no-store',
+  });
 
   if (res.status === 401 && retry) {
     const newToken = await refreshAccessToken();
