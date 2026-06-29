@@ -163,6 +163,21 @@ export const api = {
   deleteTask: (id: string) =>
     request<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
 
+  parseTask: (input: string) =>
+    request<{
+      title: string;
+      datetime?: string;
+      priority?: string;
+      confidence: number;
+      intent: string;
+      createPayload: {
+        title: string;
+        priority?: string;
+        status?: string;
+        dueDate?: string;
+      };
+    }>('/ai-task/parse', { method: 'POST', body: JSON.stringify({ input }) }),
+
   getReminders: (params?: { page?: number; limit?: number; status?: string }) => {
     const q = new URLSearchParams();
     if (params?.page) q.set('page', String(params.page));

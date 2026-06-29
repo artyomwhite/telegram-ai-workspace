@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { ActivityModule } from './activity/activity.module';
+import { AiTaskModule } from './ai-task/ai-task.module';
 import { AuthModule } from './auth/auth.module';
 import { CompaniesModule } from './companies/companies.module';
 import { ContactsModule } from './contacts/contacts.module';
 import configuration from './config/configuration';
+import { DigestModule } from './digest/digest.module';
 import { validate } from './config/env.validation';
 import { HealthModule } from './health/health.module';
 import { NotesModule } from './notes/notes.module';
@@ -30,6 +33,7 @@ import { UsersModule } from './users/users.module';
         limit: 100,
       },
     ]),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -39,6 +43,8 @@ import { UsersModule } from './users/users.module';
     NotesModule,
     RemindersModule,
     ActivityModule,
+    AiTaskModule,
+    DigestModule,
     StatisticsModule,
     TelegramModule,
     HealthModule,

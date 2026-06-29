@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ActivityType, TaskPriority, TaskStatus } from '@prisma/client';
 import { ActivityService } from '../activity/activity.service';
+import { AiTaskIntent, AiTaskParseResult } from '../ai-task/ai-task.intent';
+import { AiTaskService } from '../ai-task/ai-task.service';
 import { CompaniesService } from '../companies/companies.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -178,6 +180,7 @@ export class TelegramBotService {
     private readonly contactsService: ContactsService,
     private readonly companiesService: CompaniesService,
     private readonly remindersService: RemindersService,
+    private readonly aiTaskService: AiTaskService,
   ) {}
 
   async handleUpdate(update: TelegramUpdate) {
@@ -266,10 +269,7 @@ export class TelegramBotService {
             await this.handleStats(chatId, user.id);
             break;
           default:
-            await this.telegramApi.sendMessage(
-              chatId,
-              'Unknown command. Type /help for available commands.',
-            );
+            await this.handleAiInput(chatId, user, text);
         }
       }
     }
@@ -347,8 +347,8 @@ export class TelegramBotService {
   ): InlineKeyboard {
     const keyboard: InlineKeyboard = tasks.map((task) => [
       { text: '✔ Complete', callback_data: `t:c:${task.id}:${page}:${limit}` },
-      { text: '🗑 Delete', callback_data: `t:d:${task.id}:${page}:${limit}` },
       { text: '✏ Update', callback_data: `t:u:${task.id}` },
+      { text: '🗑 Delete', callback_data: `t:d:${task.id}:${page}:${limit}` },
     ]);
 
     if (totalPages > 1) {
@@ -543,11 +543,14 @@ export class TelegramBotService {
 /start - Welcome message
 /connect &lt;email&gt; - Link your account
 /help - Show this help
-/newtask &lt;title&gt; - Create a new task
+/newtask &lt;title&gt; - Create a new task (AI parses dates &amp; priority)
 /tasks [page] [limit] - List tasks (default 1, 5)
 /deletetask &lt;id|#&gt; - Delete a task
 /completetask &lt;id|#&gt; - Complete a task
 /updatetask &lt;id&gt; &lt;field=value&gt; - Update a task
+
+<b>AI mode:</b> send natural language
+Example: <i>Call client tomorrow at 5pm high priority</i>
 /remind &lt;title&gt; | &lt;datetime&gt; - Set a reminder
 /contact &lt;name&gt; - Quick add contact
 /company &lt;name&gt; - Quick add company
@@ -632,6 +635,29 @@ export class TelegramBotService {
     );
   }
 
+  private async createTaskFromParsed(
+    chatId: string,
+    user: { id: string; email: string },
+    parsed: AiTaskParseResult,
+    rawInput: string,
+  ) {
+    this.logger.log(
+      `TelegramUser → DashboardUser mapping: ${user.email} (userId=${user.id})`,
+    );
+    const payload = this.aiTaskService.toCreatePayload(parsed);
+    const task = await this.tasksService.create(user.id, payload);
+
+    await this.telegramApi.sendMessage(
+      chatId,
+      `${this.aiTaskService.formatCreateConfirmation(parsed)}\nID: ${task.id}\nAccount: ${user.email}`,
+    );
+    void this.aiTaskService.logAiRequest(
+      user.id,
+      rawInput,
+      JSON.stringify(parsed),
+    );
+  }
+
   private async handleNewTask(
     chatId: string,
     user: { id: string; email: string },
@@ -645,19 +671,82 @@ export class TelegramBotService {
       return;
     }
 
-    this.logger.log(
-      `TelegramUser → DashboardUser mapping: ${user.email} (userId=${user.id})`,
-    );
-    const task = await this.tasksService.create(user.id, {
-      title,
-      priority: TaskPriority.MEDIUM,
-      status: TaskStatus.TODO,
-    });
+    const parsed = this.aiTaskService.parse(title);
+    await this.createTaskFromParsed(chatId, user, parsed, title);
+  }
 
-    await this.telegramApi.sendMessage(
-      chatId,
-      `✅ Task created: <b>${task.title}</b>\nID: ${task.id}\nAccount: ${user.email}`,
+  private async handleAiInput(
+    chatId: string,
+    user: { id: string; email: string },
+    text: string,
+  ) {
+    const parsed = this.aiTaskService.parse(text);
+
+    if (
+      parsed.intent === AiTaskIntent.UNKNOWN ||
+      (parsed.confidence < 0.55 && parsed.intent === AiTaskIntent.CREATE_TASK)
+    ) {
+      await this.telegramApi.sendMessage(
+        chatId,
+        'Unknown command. Type /help or send a task in natural language.\n\nExample: <i>Call client tomorrow at 5pm high priority</i>',
+      );
+      return;
+    }
+
+    void this.aiTaskService.logAiRequest(
+      user.id,
+      text,
+      JSON.stringify(parsed),
     );
+
+    switch (parsed.intent) {
+      case AiTaskIntent.CREATE_TASK:
+        await this.createTaskFromParsed(chatId, user, parsed, text);
+        break;
+      case AiTaskIntent.LIST_TASKS:
+        await this.handleTasks(chatId, user, 1, 5);
+        break;
+      case AiTaskIntent.COMPLETE_TASK:
+        if (parsed.taskRef) {
+          await this.handleCompleteTask(chatId, user, parsed.taskRef);
+        } else {
+          await this.telegramApi.sendMessage(
+            chatId,
+            'Which task? Try: <i>complete task 1</i> or /completetask 1',
+          );
+        }
+        break;
+      case AiTaskIntent.DELETE_TASK:
+        if (parsed.taskRef) {
+          await this.handleDeleteTask(chatId, user, parsed.taskRef);
+        } else {
+          await this.telegramApi.sendMessage(
+            chatId,
+            'Which task? Try: <i>delete task 2</i> or /deletetask 2',
+          );
+        }
+        break;
+      case AiTaskIntent.UPDATE_TASK:
+        if (parsed.taskRef && parsed.updates) {
+          await this.handleUpdateTask(chatId, user, [
+            parsed.taskRef,
+            ...Object.entries(parsed.updates).map(
+              ([k, v]) => `${k}=${v}`,
+            ),
+          ]);
+        } else {
+          await this.telegramApi.sendMessage(
+            chatId,
+            'Try: <i>update task 1 priority=HIGH</i> or /updatetask 1 priority=HIGH',
+          );
+        }
+        break;
+      default:
+        await this.telegramApi.sendMessage(
+          chatId,
+          'Unknown command. Type /help for available commands.',
+        );
+    }
   }
 
   private async handleTasks(

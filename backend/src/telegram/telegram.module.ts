@@ -1,6 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ActivityModule } from '../activity/activity.module';
+import { AiTaskModule } from '../ai-task/ai-task.module';
 import { CompaniesModule } from '../companies/companies.module';
 import { ContactsModule } from '../contacts/contacts.module';
 import { RemindersModule } from '../reminders/reminders.module';
@@ -15,6 +16,7 @@ import {
 @Module({
   imports: [
     ActivityModule,
+    AiTaskModule,
     TasksModule,
     ContactsModule,
     CompaniesModule,
