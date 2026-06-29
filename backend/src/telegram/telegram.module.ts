@@ -35,11 +35,15 @@ export class TelegramModule implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    const webhookUrl = this.configService.get<string>('telegram.webhookUrl');
     const botToken = this.configService.get<string>('telegram.botToken');
+    const webhookUrl = this.configService.get<string>('telegram.webhookUrl');
 
-    if (webhookUrl && botToken && process.env.NODE_ENV === 'production') {
-      await this.telegramApi.setWebhook(`${webhookUrl}/telegram/webhook`);
+    if (!webhookUrl || !botToken) {
+      return;
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      await this.telegramApi.registerWebhookFromEnv();
     }
   }
 }

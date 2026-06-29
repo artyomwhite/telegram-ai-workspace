@@ -41,11 +41,7 @@ export class TelegramController {
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async setupWebhook() {
-    const webhookUrl = process.env.WEBHOOK_URL;
-    if (!webhookUrl) {
-      return { ok: false, message: 'WEBHOOK_URL not configured' };
-    }
-    return this.apiService.setWebhook(`${webhookUrl}/telegram/webhook`);
+    return this.apiService.registerWebhookFromEnv();
   }
 
   @Get('webhook/info')

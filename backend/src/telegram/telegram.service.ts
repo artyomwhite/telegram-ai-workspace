@@ -17,6 +17,14 @@ interface TelegramUpdate {
   };
 }
 
+export function resolveWebhookTargetUrl(webhookUrl: string): string {
+  const normalized = webhookUrl.replace(/\/$/, '');
+  if (normalized.endsWith('/telegram/webhook')) {
+    return normalized;
+  }
+  return `${normalized}/telegram/webhook`;
+}
+
 @Injectable()
 export class TelegramApiService {
   private readonly logger = new Logger(TelegramApiService.name);
@@ -52,14 +60,38 @@ export class TelegramApiService {
 
   async setWebhook(url: string): Promise<Record<string, unknown>> {
     const token = this.configService.get<string>('telegram.botToken');
-    if (!token) return { ok: false, description: 'No bot token' };
+    if (!token) {
+      this.logger.warn('TELEGRAM_BOT_TOKEN not configured');
+      return { ok: false, description: 'No bot token' };
+    }
 
     const response = await fetch(`${this.baseUrl}/setWebhook`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    return response.json() as Promise<Record<string, unknown>>;
+    const result = (await response.json()) as Record<string, unknown>;
+
+    if (!response.ok || result.ok === false) {
+      this.logger.error(
+        `setWebhook failed for ${url}: ${JSON.stringify(result)}`,
+      );
+    } else {
+      this.logger.log(`setWebhook succeeded for ${url}`);
+    }
+
+    return result;
+  }
+
+  async registerWebhookFromEnv(): Promise<Record<string, unknown>> {
+    const webhookUrl = this.configService.get<string>('telegram.webhookUrl');
+    if (!webhookUrl) {
+      this.logger.warn('WEBHOOK_URL not configured');
+      return { ok: false, description: 'WEBHOOK_URL not configured' };
+    }
+
+    const targetUrl = resolveWebhookTargetUrl(webhookUrl);
+    return this.setWebhook(targetUrl);
   }
 
   async deleteWebhook(): Promise<Record<string, unknown>> {
