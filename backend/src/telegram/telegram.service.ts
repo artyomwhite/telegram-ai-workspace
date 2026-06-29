@@ -8,12 +8,25 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RemindersService } from '../reminders/reminders.service';
 import { TasksService } from '../tasks/tasks.service';
 
+type InlineKeyboardButton = {
+  text: string;
+  callback_data: string;
+};
+
+type InlineKeyboard = InlineKeyboardButton[][];
+
 interface TelegramUpdate {
   message?: {
     message_id: number;
     chat: { id: number; type: string };
     from?: { id: number; username?: string; first_name?: string };
     text?: string;
+  };
+  callback_query?: {
+    id: string;
+    from: { id: number; username?: string };
+    message?: { chat: { id: number }; message_id: number };
+    data?: string;
   };
 }
 
@@ -35,7 +48,11 @@ export class TelegramApiService {
     this.baseUrl = `https://api.telegram.org/bot${token}`;
   }
 
-  async sendMessage(chatId: string | number, text: string) {
+  async sendMessage(
+    chatId: string | number,
+    text: string,
+    keyboard?: InlineKeyboard,
+  ) {
     const token = this.configService.get<string>('telegram.botToken');
     if (!token) {
       this.logger.warn('TELEGRAM_BOT_TOKEN not configured');
@@ -49,6 +66,7 @@ export class TelegramApiService {
         chat_id: chatId,
         text,
         parse_mode: 'HTML',
+        ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
       }),
     });
 
@@ -56,6 +74,47 @@ export class TelegramApiService {
       const error = await response.text();
       this.logger.error(`Telegram API error: ${error}`);
     }
+  }
+
+  async editMessageText(
+    chatId: string | number,
+    messageId: number,
+    text: string,
+    keyboard?: InlineKeyboard,
+  ) {
+    const token = this.configService.get<string>('telegram.botToken');
+    if (!token) return;
+
+    const response = await fetch(`${this.baseUrl}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: 'HTML',
+        ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logger.error(`Telegram editMessageText error: ${error}`);
+    }
+  }
+
+  async answerCallbackQuery(callbackQueryId: string, text?: string) {
+    const token = this.configService.get<string>('telegram.botToken');
+    if (!token) return;
+
+    await fetch(`${this.baseUrl}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        ...(text ? { text, show_alert: false } : {}),
+      }),
+    });
   }
 
   async setWebhook(url: string): Promise<Record<string, unknown>> {
@@ -122,6 +181,11 @@ export class TelegramBotService {
   ) {}
 
   async handleUpdate(update: TelegramUpdate) {
+    if (update.callback_query) {
+      await this.handleCallbackQuery(update.callback_query);
+      return;
+    }
+
     const message = update.message;
     if (!message?.text || !message.from) return;
 
@@ -170,7 +234,21 @@ export class TelegramBotService {
             await this.handleNewTask(chatId, user, argText);
             break;
           case '/tasks':
-            await this.handleTasks(chatId, user.id);
+            await this.handleTasks(
+              chatId,
+              user,
+              this.parseTasksPage(args[0]),
+              this.parseTasksLimit(args[1]),
+            );
+            break;
+          case '/deletetask':
+            await this.handleDeleteTask(chatId, user, argText);
+            break;
+          case '/completetask':
+            await this.handleCompleteTask(chatId, user, argText);
+            break;
+          case '/updatetask':
+            await this.handleUpdateTask(chatId, user, args);
             break;
           case '/remind':
             await this.handleRemind(chatId, user.id, argText);
@@ -228,8 +306,216 @@ export class TelegramBotService {
     }
 
     const user = connection.user;
-    this.logger.log(`Telegram user: ${user.id} (${user.email})`);
+    this.logger.log(
+      `TelegramUser → DashboardUser mapping: ${user.email} (userId=${user.id})`,
+    );
     return user;
+  }
+
+  private parseTasksPage(value?: string): number {
+    const page = parseInt(value ?? '', 10);
+    return Number.isFinite(page) && page > 0 ? page : 1;
+  }
+
+  private parseTasksLimit(value?: string): number {
+    const limit = parseInt(value ?? '', 10);
+    if (!Number.isFinite(limit) || limit < 1) return 5;
+    return Math.min(5, limit);
+  }
+
+  private priorityEmoji(priority: TaskPriority): string {
+    if (priority === TaskPriority.HIGH || priority === TaskPriority.URGENT) {
+      return ' 🔥';
+    }
+    return '';
+  }
+
+  private formatTaskLine(
+    index: number,
+    title: string,
+    status: TaskStatus,
+    priority: TaskPriority,
+  ): string {
+    return `${index}. ${title} [${status}] [${priority}]${this.priorityEmoji(priority)}`;
+  }
+
+  private buildTaskKeyboard(
+    tasks: { id: string; title: string }[],
+    page: number,
+    limit: number,
+    totalPages: number,
+  ): InlineKeyboard {
+    const keyboard: InlineKeyboard = tasks.map((task) => [
+      { text: '✔ Complete', callback_data: `t:c:${task.id}:${page}:${limit}` },
+      { text: '🗑 Delete', callback_data: `t:d:${task.id}:${page}:${limit}` },
+      { text: '✏ Update', callback_data: `t:u:${task.id}` },
+    ]);
+
+    if (totalPages > 1) {
+      const nav: InlineKeyboardButton[] = [];
+      if (page > 1) {
+        nav.push({ text: '◀ Prev', callback_data: `t:prev:${page}:${limit}` });
+      }
+      if (page < totalPages) {
+        nav.push({ text: 'Next ▶', callback_data: `t:next:${page}:${limit}` });
+      }
+      if (nav.length) keyboard.push(nav);
+    }
+
+    return keyboard;
+  }
+
+  private async renderTasksPage(
+    chatId: string,
+    user: { id: string; email: string },
+    page: number,
+    limit: number,
+    messageId?: number,
+  ) {
+    const { data, total } = await this.tasksService.findAll(
+      user.id,
+      page,
+      limit,
+    );
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(page, totalPages);
+
+    if (safePage !== page) {
+      return this.renderTasksPage(chatId, user, safePage, limit, messageId);
+    }
+
+    if (data.length === 0) {
+      const text = 'No tasks. Use /newtask to create one.';
+      if (messageId) {
+        await this.telegramApi.editMessageText(chatId, messageId, text);
+      } else {
+        await this.telegramApi.sendMessage(chatId, text);
+      }
+      return;
+    }
+
+    const lines = data.map((t, i) =>
+      this.formatTaskLine(
+        (page - 1) * limit + i + 1,
+        t.title,
+        t.status,
+        t.priority,
+      ),
+    );
+    const text = `<b>Page ${page}/${totalPages}</b>\n\n${lines.join('\n')}`;
+    const keyboard = this.buildTaskKeyboard(data, page, limit, totalPages);
+
+    if (messageId) {
+      await this.telegramApi.editMessageText(
+        chatId,
+        messageId,
+        text,
+        keyboard,
+      );
+    } else {
+      await this.telegramApi.sendMessage(chatId, text, keyboard);
+    }
+  }
+
+  private async handleCallbackQuery(
+    query: NonNullable<TelegramUpdate['callback_query']>,
+  ) {
+    const chatId = query.message?.chat.id;
+    const messageId = query.message?.message_id;
+    const telegramUserId = String(query.from.id);
+    const data = query.data ?? '';
+
+    if (!chatId) {
+      await this.telegramApi.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const user = await this.resolveTelegramUser(
+      telegramUserId,
+      String(chatId),
+    );
+    if (!user) {
+      await this.telegramApi.answerCallbackQuery(
+        query.id,
+        'Connect your account with /connect <email>',
+      );
+      return;
+    }
+
+    const [prefix, action, ...rest] = data.split(':');
+
+    try {
+      if (prefix === 't' && action === 'c' && rest[0]) {
+        const page = this.parseTasksPage(rest[1]);
+        const limit = this.parseTasksLimit(rest[2]);
+        await this.tasksService.update(user.id, rest[0], {
+          status: TaskStatus.COMPLETED,
+        });
+        await this.telegramApi.answerCallbackQuery(query.id, 'Task completed');
+        if (messageId) {
+          await this.renderTasksPage(
+            String(chatId),
+            user,
+            page,
+            limit,
+            messageId,
+          );
+        }
+        return;
+      }
+
+      if (prefix === 't' && action === 'd' && rest[0]) {
+        const page = this.parseTasksPage(rest[1]);
+        const limit = this.parseTasksLimit(rest[2]);
+        await this.tasksService.remove(user.id, rest[0]);
+        await this.telegramApi.answerCallbackQuery(query.id, 'Task deleted');
+        if (messageId) {
+          await this.renderTasksPage(
+            String(chatId),
+            user,
+            page,
+            limit,
+            messageId,
+          );
+        }
+        return;
+      }
+
+      if (prefix === 't' && action === 'u' && rest[0]) {
+        await this.telegramApi.answerCallbackQuery(query.id);
+        await this.telegramApi.sendMessage(
+          String(chatId),
+          `✏ Update task <code>${rest[0]}</code>:\n/updatetask ${rest[0]} priority=HIGH\n/updatetask ${rest[0]} status=IN_PROGRESS\n/updatetask ${rest[0]} title=New title`,
+        );
+        return;
+      }
+
+      if (prefix === 't' && (action === 'prev' || action === 'next') && rest[0]) {
+        const currentPage = parseInt(rest[0], 10);
+        const limit = this.parseTasksLimit(rest[1]);
+        const page =
+          action === 'prev'
+            ? Math.max(1, currentPage - 1)
+            : currentPage + 1;
+        await this.telegramApi.answerCallbackQuery(query.id);
+        if (messageId) {
+          await this.renderTasksPage(
+            String(chatId),
+            user,
+            page,
+            limit,
+            messageId,
+          );
+        }
+        return;
+      }
+    } catch (err) {
+      this.logger.error(`Callback action failed: ${String(err)}`);
+      await this.telegramApi.answerCallbackQuery(query.id, 'Action failed');
+      return;
+    }
+
+    await this.telegramApi.answerCallbackQuery(query.id);
   }
 
   private async handleStart(
@@ -258,7 +544,10 @@ export class TelegramBotService {
 /connect &lt;email&gt; - Link your account
 /help - Show this help
 /newtask &lt;title&gt; - Create a new task
-/tasks - List your open tasks
+/tasks [page] [limit] - List tasks (default 1, 5)
+/deletetask &lt;id|#&gt; - Delete a task
+/completetask &lt;id|#&gt; - Complete a task
+/updatetask &lt;id&gt; &lt;field=value&gt; - Update a task
 /remind &lt;title&gt; | &lt;datetime&gt; - Set a reminder
 /contact &lt;name&gt; - Quick add contact
 /company &lt;name&gt; - Quick add company
@@ -333,7 +622,9 @@ export class TelegramBotService {
       `Telegram account connected (@${username ?? telegramUserId})`,
     );
 
-    this.logger.log(`Telegram user: ${user.id} (${user.email})`);
+    this.logger.log(
+      `TelegramUser → DashboardUser mapping: ${user.email} (userId=${user.id})`,
+    );
 
     await this.telegramApi.sendMessage(
       chatId,
@@ -354,7 +645,9 @@ export class TelegramBotService {
       return;
     }
 
-    this.logger.log(`Telegram user: ${user.id}`);
+    this.logger.log(
+      `TelegramUser → DashboardUser mapping: ${user.email} (userId=${user.id})`,
+    );
     const task = await this.tasksService.create(user.id, {
       title,
       priority: TaskPriority.MEDIUM,
@@ -367,24 +660,134 @@ export class TelegramBotService {
     );
   }
 
-  private async handleTasks(chatId: string, userId: string) {
-    const { data } = await this.tasksService.findAll(userId, 1, 10, undefined, {
-      status: TaskStatus.TODO,
-    });
+  private async handleTasks(
+    chatId: string,
+    user: { id: string; email: string },
+    page: number,
+    limit: number,
+  ) {
+    await this.renderTasksPage(chatId, user, page, limit);
+  }
 
-    if (data.length === 0) {
+  private async handleDeleteTask(
+    chatId: string,
+    user: { id: string; email: string },
+    idOrNumber: string,
+  ) {
+    if (!idOrNumber) {
       await this.telegramApi.sendMessage(
         chatId,
-        'No open tasks. Use /newtask to create one.',
+        'Usage: /deletetask &lt;id|#&gt;',
       );
       return;
     }
 
-    const list = data
-      .map((t, i) => `${i + 1}. <b>${t.title}</b> [${t.priority}]`)
-      .join('\n');
+    const task = await this.tasksService.resolveByIdOrIndex(
+      user.id,
+      idOrNumber,
+    );
+    if (!task) {
+      await this.telegramApi.sendMessage(chatId, 'Task not found.');
+      return;
+    }
 
-    await this.telegramApi.sendMessage(chatId, `<b>Open Tasks</b>\n\n${list}`);
+    await this.tasksService.remove(user.id, task.id);
+    await this.telegramApi.sendMessage(
+      chatId,
+      `🗑 Deleted: <b>${task.title}</b>`,
+    );
+  }
+
+  private async handleCompleteTask(
+    chatId: string,
+    user: { id: string; email: string },
+    idOrNumber: string,
+  ) {
+    if (!idOrNumber) {
+      await this.telegramApi.sendMessage(
+        chatId,
+        'Usage: /completetask &lt;id|#&gt;',
+      );
+      return;
+    }
+
+    const task = await this.tasksService.resolveByIdOrIndex(
+      user.id,
+      idOrNumber,
+    );
+    if (!task) {
+      await this.telegramApi.sendMessage(chatId, 'Task not found.');
+      return;
+    }
+
+    await this.tasksService.update(user.id, task.id, {
+      status: TaskStatus.COMPLETED,
+    });
+    await this.telegramApi.sendMessage(
+      chatId,
+      `✅ Completed: <b>${task.title}</b>`,
+    );
+  }
+
+  private async handleUpdateTask(
+    chatId: string,
+    user: { id: string; email: string },
+    args: string[],
+  ) {
+    const [idOrNumber, ...fieldParts] = args;
+    if (!idOrNumber || fieldParts.length === 0) {
+      await this.telegramApi.sendMessage(
+        chatId,
+        'Usage: /updatetask &lt;id&gt; priority=HIGH',
+      );
+      return;
+    }
+
+    const task = await this.tasksService.resolveByIdOrIndex(
+      user.id,
+      idOrNumber,
+    );
+    if (!task) {
+      await this.telegramApi.sendMessage(chatId, 'Task not found.');
+      return;
+    }
+
+    const updates: Record<string, string> = {};
+    for (const part of fieldParts.join(' ').split(/\s+/)) {
+      const eq = part.indexOf('=');
+      if (eq === -1) continue;
+      updates[part.slice(0, eq).toLowerCase()] = part.slice(eq + 1);
+    }
+
+    const dto: {
+      title?: string;
+      description?: string;
+      status?: TaskStatus;
+      priority?: TaskPriority;
+    } = {};
+
+    if (updates.title) dto.title = updates.title;
+    if (updates.description) dto.description = updates.description;
+    if (updates.status && Object.values(TaskStatus).includes(updates.status as TaskStatus)) {
+      dto.status = updates.status as TaskStatus;
+    }
+    if (updates.priority && Object.values(TaskPriority).includes(updates.priority as TaskPriority)) {
+      dto.priority = updates.priority as TaskPriority;
+    }
+
+    if (!Object.keys(dto).length) {
+      await this.telegramApi.sendMessage(
+        chatId,
+        'Supported fields: title, description, status, priority',
+      );
+      return;
+    }
+
+    const updated = await this.tasksService.update(user.id, task.id, dto);
+    await this.telegramApi.sendMessage(
+      chatId,
+      `✏ Updated: <b>${updated?.title ?? task.title}</b>`,
+    );
   }
 
   private async handleRemind(chatId: string, userId: string, input: string) {

@@ -146,4 +146,15 @@ export class TasksService {
     );
     return { success: true };
   }
+
+  async resolveByIdOrIndex(userId: string, idOrNumber: string) {
+    const byId = await this.repository.findById(userId, idOrNumber);
+    if (byId) return byId;
+
+    const index = parseInt(idOrNumber, 10);
+    if (!Number.isFinite(index) || index < 1) return null;
+
+    const [data] = await this.repository.findMany(userId, index - 1, 1);
+    return data[0] ?? null;
+  }
 }
