@@ -7,6 +7,7 @@ import {
   IsUrl,
   validateSync,
 } from 'class-validator';
+import { normalizeOriginUrl } from './configuration';
 
 enum Environment {
   Development = 'development',
@@ -49,7 +50,16 @@ class EnvironmentVariables {
 }
 
 export function validate(config: Record<string, unknown>) {
-  const validatedConfig = plainToInstance(EnvironmentVariables, config, {
+  const normalizedConfig = { ...config };
+
+  if (typeof normalizedConfig.FRONTEND_URL === 'string') {
+    normalizedConfig.FRONTEND_URL = normalizeOriginUrl(
+      normalizedConfig.FRONTEND_URL,
+      normalizedConfig.FRONTEND_URL,
+    );
+  }
+
+  const validatedConfig = plainToInstance(EnvironmentVariables, normalizedConfig, {
     enableImplicitConversion: true,
   });
 

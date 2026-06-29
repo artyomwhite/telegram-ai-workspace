@@ -23,6 +23,7 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalExceptionFilter());
 
   const frontendUrl = configService.get<string>('frontendUrl');
+  logger.log(`CORS allowed origin: ${frontendUrl}`);
   app.enableCors({
     origin: frontendUrl,
     credentials: true,
