@@ -371,7 +371,7 @@ export class TelegramBotService {
     page: number,
     limit: number,
     messageId?: number,
-  ) {
+  ): Promise<void> {
     const { data, total } = await this.tasksService.findAll(
       user.id,
       page,
