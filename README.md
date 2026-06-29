@@ -1,270 +1,166 @@
 # Telegram AI Business Assistant
 
-A production-grade full-stack SaaS application for managing business contacts, companies, tasks, and reminders — with Telegram Bot integration and an AI-ready architecture.
+Full-stack CRM with Telegram bot integration.  
+The project includes a Next.js frontend, a NestJS API, and PostgreSQL persistence via Prisma.
 
-![Dashboard Screenshot](./docs/screenshots/dashboard.png)
-![Telegram Integration](./docs/screenshots/telegram.png)
+## Project Overview
 
-## Overview
+The application provides account-based business management with:
+- contacts and companies
+- task and reminder workflows
+- activity tracking
+- Telegram bot command handling through webhook mode
 
-**BizAssistant** is a modern business CRM that combines a web dashboard with a Telegram bot. Users can manage their business data through a polished SaaS interface or directly from Telegram. Built with enterprise patterns: modular NestJS backend, Next.js 15 frontend, JWT authentication, and PostgreSQL persistence.
+## Features
 
-### Key Features
+- JWT authentication (register, login, refresh)
+- Contacts, companies, tasks, notes, reminders CRUD
+- Search, filtering, pagination, and dashboard statistics
+- Telegram commands: `/start`, `/connect`, `/help`, `/newtask`, `/tasks`, `/remind`, `/contact`, `/company`, `/search`, `/stats`
+- API documentation with Swagger (`/api/docs`)
+- Health endpoint (`/api/health`)
 
-- **Authentication** — Register, login, JWT access tokens, refresh token rotation
-- **CRM** — Contacts, companies, tasks (with statuses/priorities), notes, reminders
-- **Telegram Bot** — Webhook mode with 10 commands (`/start`, `/connect`, `/tasks`, etc.)
-- **Dashboard** — Statistics, recent activity, search, filtering, pagination
-- **API** — RESTful endpoints with Swagger documentation
-- **Security** — Helmet, rate limiting, CORS, input validation, password hashing
+## Tech Stack
+
+- Frontend: Next.js 15, React 19, TypeScript, Tailwind CSS
+- Backend: NestJS 11, TypeScript, Prisma ORM
+- Database: PostgreSQL (Neon)
+- Deployment: Vercel (frontend), Render (backend, Docker)
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Next.js 15     │────▶│  NestJS API      │────▶│  Neon PostgreSQL│
-│  (Vercel)       │     │  (Render/Docker) │     │                 │
-└─────────────────┘     └────────┬─────────┘     └─────────────────┘
-                                   │
-                          ┌────────▼─────────┐
-                          │  Telegram Bot API │
-                          │  (Webhook mode)   │
-                          └──────────────────┘
+Frontend (Next.js, Vercel)
+        |
+        v
+Backend API (NestJS, Render, Docker)
+        |
+        v
+PostgreSQL (Neon)
+        ^
+        |
+Telegram Bot API (Webhook -> Backend /api/telegram/webhook)
 ```
-
-### Backend Modules
-
-| Module | Description |
-|--------|-------------|
-| `auth` | JWT login, register, refresh |
-| `users` | Profile management |
-| `contacts` | CRUD with search & pagination |
-| `companies` | CRUD with relations |
-| `tasks` | Status workflow, priorities, due dates |
-| `notes` | Standalone and task-linked notes |
-| `reminders` | Scheduled reminders |
-| `telegram` | Webhook handler, bot commands |
-| `activity` | Audit log for all actions |
-| `statistics` | Dashboard aggregates |
-| `health` | Health check endpoint |
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 15, React 19, TypeScript, TailwindCSS |
-| Backend | NestJS 11, TypeScript, Prisma ORM |
-| Database | PostgreSQL (Neon) |
-| Bot | Telegram Bot API (webhook) |
-| Auth | JWT + Refresh Tokens, bcrypt |
-| Docs | Swagger/OpenAPI |
-| Deploy | Vercel (frontend), Render (backend), Neon (DB) |
 
 ## Folder Structure
 
 ```
-telegram-ai-business-assistant/
+telegram-ai-workspace/
 ├── backend/
 │   ├── prisma/
-│   │   ├── schema.prisma      # Database schema
-│   │   ├── seed.ts            # Demo data seeder
-│   │   └── migrations/        # Prisma migrations
 │   ├── src/
-│   │   ├── auth/              # Authentication module
-│   │   ├── contacts/          # Contacts CRUD
-│   │   ├── companies/         # Companies CRUD
-│   │   ├── tasks/             # Tasks module
-│   │   ├── notes/             # Notes module
-│   │   ├── reminders/         # Reminders module
-│   │   ├── telegram/          # Bot webhook & commands
-│   │   ├── activity/          # Activity logging
-│   │   ├── statistics/        # Dashboard stats
-│   │   ├── health/            # Health check
-│   │   ├── common/            # Guards, filters, DTOs
-│   │   ├── config/            # Environment validation
-│   │   └── prisma/            # Prisma service
-│   ├── Dockerfile             # Render deployment
+│   ├── Dockerfile
 │   └── .env.example
 ├── frontend/
 │   ├── src/
-│   │   ├── app/               # Next.js App Router pages
-│   │   ├── components/        # UI components & layout
-│   │   ├── context/           # Auth provider
-│   │   └── lib/               # API client, types, utils
+│   ├── vercel.json
 │   └── .env.example
-├── render.yaml                # Render Blueprint
-├── .env.example               # Root environment template
+├── .env.example
+├── render.yaml
 └── README.md
 ```
 
-## Environment Variables
-
-Copy `.env.example` to configure your environment:
-
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | Neon PostgreSQL connection string |
-| `JWT_SECRET` | Access token signing secret |
-| `JWT_REFRESH_SECRET` | Refresh token signing secret |
-| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
-| `WEBHOOK_URL` | Backend public URL (e.g. `https://api.example.com/api`) |
-| `FRONTEND_URL` | Frontend URL for CORS |
-| `BACKEND_URL` | Backend public URL |
-| `NEXT_PUBLIC_API_URL` | API URL for frontend (e.g. `https://api.example.com/api`) |
-
-## Running Locally
+## Installation
 
 ### Prerequisites
 
 - Node.js 20+
-- PostgreSQL database (Neon free tier works)
-- No Docker required locally
+- PostgreSQL database (Neon or local Postgres)
 
-### 1. Database Setup (Neon)
-
-1. Create a project at [neon.tech](https://neon.tech)
-2. Copy the connection string
-
-### 2. Backend
+### Backend
 
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env with your DATABASE_URL and secrets
-
 npm install
 npx prisma migrate dev
 npx prisma db seed
 npm run start:dev
 ```
 
-API runs at `http://localhost:3001`  
-Swagger docs at `http://localhost:3001/api/docs`
+Backend runs on `http://localhost:3001` with Swagger at `http://localhost:3001/api/docs`.
 
-### 3. Frontend
+### Frontend
 
 ```bash
 cd frontend
 cp .env.example .env.local
-# Set NEXT_PUBLIC_API_URL=http://localhost:3001/api
-
 npm install
 npm run dev
 ```
 
-App runs at `http://localhost:3000`
+Frontend runs on `http://localhost:3000`.
 
-### Demo Account
+## Environment Variables
 
-After seeding:
-- **Email:** `demo@businessassistant.app`
-- **Password:** `Demo1234!`
+Required variables are documented in:
+- root: `.env.example`
+- backend: `backend/.env.example`
+- frontend: `frontend/.env.example`
 
-## Deploy to Render (Backend)
+Core variables:
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `JWT_REFRESH_SECRET`
+- `JWT_EXPIRES_IN`
+- `JWT_REFRESH_EXPIRES_IN`
+- `TELEGRAM_BOT_TOKEN`
+- `WEBHOOK_URL`
+- `FRONTEND_URL`
+- `BACKEND_URL`
+- `NEXT_PUBLIC_API_URL`
+- `PORT`
+- `NODE_ENV`
 
-1. Push repo to GitHub
-2. Create a new **Web Service** on [Render](https://render.com)
-3. Connect your repository
-4. Set **Root Directory** to `backend` or use `render.yaml` Blueprint
-5. Select **Docker** as runtime (uses `backend/Dockerfile`)
-6. Add environment variables from `.env.example`
-7. Set `WEBHOOK_URL` to `https://your-service.onrender.com/api`
-8. Deploy — migrations and seed run automatically on startup
+## Deployment
 
-## Deploy to Vercel (Frontend)
+### Render (Backend)
 
-1. Import the GitHub repo on [Vercel](https://vercel.com)
-2. Set **Root Directory** to `frontend`
-3. Add environment variable:
-   - `NEXT_PUBLIC_API_URL` = `https://your-backend.onrender.com/api`
-4. Deploy
+- Uses `backend/Dockerfile`
+- Blueprint file: `render.yaml`
+- Health check path: `/api/health`
+- Start command in container runs:
+  - `prisma migrate deploy`
+  - `prisma db seed`
+  - `node dist/main`
 
-Update backend `FRONTEND_URL` to your Vercel URL after deployment.
+### Vercel (Frontend)
 
-## Telegram Bot Setup
+- Root directory: `frontend`
+- Build command: `npm run build`
+- Required env:
+  - `NEXT_PUBLIC_API_URL=https://<your-render-backend>/api`
 
-1. Create a bot via [@BotFather](https://t.me/BotFather)
-2. Copy the token to `TELEGRAM_BOT_TOKEN`
-3. Set `WEBHOOK_URL` to your backend URL + `/api` (webhook registers at `/api/telegram/webhook`)
-4. In Telegram, send `/connect your@email.com` to link your account
+### Neon (Database)
 
-### Bot Commands
+- Create PostgreSQL database and copy connection string to:
+  - `DATABASE_URL` (backend)
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Welcome message |
-| `/connect <email>` | Link dashboard account |
-| `/help` | List commands |
-| `/newtask <title>` | Create task |
-| `/tasks` | List open tasks |
-| `/remind <title> \| <datetime>` | Set reminder |
-| `/contact <name>` | Add contact |
-| `/company <name>` | Add company |
-| `/search <query>` | Search all data |
-| `/stats` | View statistics |
+## API Endpoints
 
-## API Overview
+Base path: `/api`
 
-Base URL: `/api`
+- Auth: `/auth/register`, `/auth/login`, `/auth/refresh`
+- Users: `/users/me`
+- Contacts: `/contacts`
+- Companies: `/companies`
+- Tasks: `/tasks`
+- Notes: `/notes`
+- Reminders: `/reminders`
+- Activity: `/activity`, `/activity/recent`
+- Statistics: `/statistics`
+- Telegram: `/telegram/webhook`, `/telegram/connection`, `/telegram/webhook/info`, `/telegram/disconnect`
+- Health: `/health`
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/auth/register` | POST | No | Create account |
-| `/auth/login` | POST | No | Login |
-| `/auth/refresh` | POST | Refresh | Refresh tokens |
-| `/users/me` | GET/PATCH | Yes | Profile |
-| `/contacts` | CRUD | Yes | Contacts |
-| `/companies` | CRUD | Yes | Companies |
-| `/tasks` | CRUD | Yes | Tasks |
-| `/notes` | CRUD | Yes | Notes |
-| `/reminders` | CRUD | Yes | Reminders |
-| `/activity` | GET | Yes | Activity log |
-| `/statistics` | GET | Yes | Dashboard stats |
-| `/telegram/webhook` | POST | No | Bot webhook |
-| `/telegram/connection` | GET | Yes | Connection status |
-| `/health` | GET | No | Health check |
+## Telegram Integration
 
-Full documentation: `/api/docs` (Swagger)
-
-## Database Schema
-
-```
-User ──┬── TelegramConnection
-       ├── Contact ── Company
-       ├── Company ──┬── Contact
-       │             └── Task
-       ├── Task ──┬── Note
-       │          └── Reminder
-       ├── Note
-       ├── Message
-       ├── Reminder
-       ├── AIRequest
-       └── ActivityLog
-```
-
-### Entities
-
-- **Users** — Authentication and ownership
-- **TelegramConnections** — Bot account linking
-- **Contacts** — People with company relations
-- **Companies** — Organizations
-- **Tasks** — TODO/IN_PROGRESS/COMPLETED/CANCELLED with priorities
-- **Notes** — Text notes (optional task link)
-- **Messages** — Telegram message log
-- **Reminders** — Scheduled notifications
-- **AIRequests** — AI-ready request queue (architecture placeholder)
-- **ActivityLogs** — Full audit trail
-
-## Future Improvements
-
-- [ ] OpenAI/GPT integration for `/ai` command and smart suggestions
-- [ ] Email notifications for reminders
-- [ ] Team workspaces with role-based access
-- [ ] Calendar view for tasks and reminders
-- [ ] CSV import/export for contacts
-- [ ] Real-time updates via WebSockets
-- [ ] Mobile PWA with offline support
-- [ ] Multi-language Telegram bot responses
+1. Create bot in BotFather and get `TELEGRAM_BOT_TOKEN`.
+2. Set `WEBHOOK_URL` to your backend public API base, e.g.:
+   `https://<render-service>.onrender.com/api`
+3. Webhook endpoint used by Telegram:
+   `https://<render-service>.onrender.com/api/telegram/webhook`
+4. Connect user account in Telegram with:
+   `/connect your@email.com`
 
 ## License
 
