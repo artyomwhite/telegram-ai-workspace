@@ -9,8 +9,9 @@ RUN npm ci
 
 COPY . .
 
-RUN npx prisma generate
 RUN npm run build
+RUN npx prisma generate
+RUN ls -R dist
 
 FROM node:20-alpine AS production
 
