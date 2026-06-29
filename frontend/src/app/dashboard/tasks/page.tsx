@@ -86,8 +86,7 @@ export default function TasksPage() {
       const items = Array.isArray(res) ? res : (res?.data ?? []);
       setTasks(items);
       setTotalPages(res?.meta?.totalPages ?? 1);
-    } catch (error) {
-      console.error('TASKS API ERROR:', error);
+    } catch {
       setTasks([]);
       setTotalPages(1);
     } finally {
@@ -170,8 +169,7 @@ export default function TasksPage() {
       });
       setAiInput('');
       await load();
-    } catch (error) {
-      console.error('AI task create failed:', error);
+    } catch {
     } finally {
       setAiLoading(false);
     }

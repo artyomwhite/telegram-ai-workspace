@@ -278,7 +278,12 @@ export class TelegramBotService {
   private async resolveTelegramUser(
     telegramUserId: string,
     chatId: string,
-  ): Promise<{ id: string; email: string; firstName: string; lastName: string } | null> {
+  ): Promise<{
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+  } | null> {
     let connection = await this.prisma.telegramConnection.findFirst({
       where: {
         isActive: true,
@@ -354,10 +359,13 @@ export class TelegramBotService {
     if (totalPages > 1) {
       const nav: InlineKeyboardButton[] = [];
       if (page > 1) {
-        nav.push({ text: '◀ Prev', callback_data: `t:prev:${page}:${limit}` });
+        nav.push({
+          text: '⬅ Previous',
+          callback_data: `t:prev:${page}:${limit}`,
+        });
       }
       if (page < totalPages) {
-        nav.push({ text: 'Next ▶', callback_data: `t:next:${page}:${limit}` });
+        nav.push({ text: 'Next ➡', callback_data: `t:next:${page}:${limit}` });
       }
       if (nav.length) keyboard.push(nav);
     }
@@ -385,7 +393,7 @@ export class TelegramBotService {
     }
 
     if (data.length === 0) {
-      const text = 'No tasks. Use /newtask to create one.';
+      const text = `<b>You don't have any tasks yet.</b>\n\nTry:\n\n/newtask Call client tomorrow 5pm`;
       if (messageId) {
         await this.telegramApi.editMessageText(chatId, messageId, text);
       } else {
@@ -402,19 +410,31 @@ export class TelegramBotService {
         t.priority,
       ),
     );
-    const text = `<b>Page ${page}/${totalPages}</b>\n\n${lines.join('\n')}`;
+    const text = `<b>Page ${page}/${totalPages}</b>\n\n${lines.join('\n')}${this.buildTasksListFooter(page, totalPages)}`;
     const keyboard = this.buildTaskKeyboard(data, page, limit, totalPages);
 
     if (messageId) {
-      await this.telegramApi.editMessageText(
-        chatId,
-        messageId,
-        text,
-        keyboard,
-      );
+      await this.telegramApi.editMessageText(chatId, messageId, text, keyboard);
     } else {
       await this.telegramApi.sendMessage(chatId, text, keyboard);
     }
+  }
+
+  private buildTasksListFooter(page: number, totalPages: number): string {
+    const lines = [
+      '',
+      '────────────',
+      '',
+      'Use the buttons below:',
+      '',
+      '✔ Complete',
+      '✏ Update',
+      '🗑 Delete',
+    ];
+    if (page < totalPages) {
+      lines.push('', 'Next page:', `/tasks ${page + 1}`);
+    }
+    return lines.join('\n');
   }
 
   private async handleCallbackQuery(
@@ -430,10 +450,7 @@ export class TelegramBotService {
       return;
     }
 
-    const user = await this.resolveTelegramUser(
-      telegramUserId,
-      String(chatId),
-    );
+    const user = await this.resolveTelegramUser(telegramUserId, String(chatId));
     if (!user) {
       await this.telegramApi.answerCallbackQuery(
         query.id,
@@ -490,13 +507,15 @@ export class TelegramBotService {
         return;
       }
 
-      if (prefix === 't' && (action === 'prev' || action === 'next') && rest[0]) {
+      if (
+        prefix === 't' &&
+        (action === 'prev' || action === 'next') &&
+        rest[0]
+      ) {
         const currentPage = parseInt(rest[0], 10);
         const limit = this.parseTasksLimit(rest[1]);
         const page =
-          action === 'prev'
-            ? Math.max(1, currentPage - 1)
-            : currentPage + 1;
+          action === 'prev' ? Math.max(1, currentPage - 1) : currentPage + 1;
         await this.telegramApi.answerCallbackQuery(query.id);
         if (messageId) {
           await this.renderTasksPage(
@@ -538,24 +557,49 @@ export class TelegramBotService {
   }
 
   private async handleHelp(chatId: string) {
-    const help = `<b>Available Commands</b>
+    const help = `<b>📋 Task Management</b>
 
-/start - Welcome message
-/connect &lt;email&gt; - Link your account
-/help - Show this help
-/newtask &lt;title&gt; - Create a new task (AI parses dates &amp; priority)
-/tasks [page] [limit] - List tasks (default 1, 5)
-/deletetask &lt;id|#&gt; - Delete a task
-/completetask &lt;id|#&gt; - Complete a task
-/updatetask &lt;id&gt; &lt;field=value&gt; - Update a task
+/newtask &lt;text&gt;
+Create task (dates &amp; priority detected automatically)
 
-<b>AI mode:</b> send natural language
-Example: <i>Call client tomorrow at 5pm high priority</i>
-/remind &lt;title&gt; | &lt;datetime&gt; - Set a reminder
-/contact &lt;name&gt; - Quick add contact
-/company &lt;name&gt; - Quick add company
-/search &lt;query&gt; - Search contacts, companies, tasks
-/stats - View your business statistics`;
+/tasks [page]
+Browse your tasks
+
+/completetask &lt;id|#&gt;
+
+/updatetask &lt;id&gt; field=value
+
+/deletetask &lt;id|#&gt;
+
+<b>🤖 AI Quick Capture</b>
+
+Just send a message like:
+
+<i>Call client tomorrow at 5pm high priority</i>
+
+No command required.
+
+<b>👥 CRM</b>
+
+/contact &lt;name&gt;
+
+/company &lt;name&gt;
+
+/search &lt;query&gt;
+
+<b>⏰ Productivity</b>
+
+/remind &lt;title&gt; | &lt;datetime&gt;
+
+/stats
+
+<b>⚙ Account</b>
+
+/connect &lt;email&gt;
+
+/start
+
+/help`;
 
     await this.telegramApi.sendMessage(chatId, help);
   }
@@ -645,17 +689,51 @@ Example: <i>Call client tomorrow at 5pm high priority</i>
       `TelegramUser → DashboardUser mapping: ${user.email} (userId=${user.id})`,
     );
     const payload = this.aiTaskService.toCreatePayload(parsed);
-    const task = await this.tasksService.create(user.id, payload);
+    await this.tasksService.create(user.id, payload);
 
     await this.telegramApi.sendMessage(
       chatId,
-      `${this.aiTaskService.formatCreateConfirmation(parsed)}\nID: ${task.id}\nAccount: ${user.email}`,
+      this.formatTaskCreatedMessage(parsed, user, payload),
     );
     void this.aiTaskService.logAiRequest(
       user.id,
       rawInput,
       JSON.stringify(parsed),
     );
+  }
+
+  private formatTaskCreatedMessage(
+    parsed: AiTaskParseResult,
+    user: { email: string },
+    payload: { title: string; priority: TaskPriority; dueDate?: Date },
+  ): string {
+    const priorityEmoji =
+      payload.priority === TaskPriority.HIGH ||
+      payload.priority === TaskPriority.URGENT
+        ? ' 🔥'
+        : '';
+    const dueLine = payload.dueDate
+      ? payload.dueDate.toLocaleString('en-US', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })
+      : 'Not set';
+
+    return [
+      '✅ <b>Task created successfully</b>',
+      '',
+      '<b>Title:</b>',
+      parsed.title,
+      '',
+      '<b>Priority:</b>',
+      `${payload.priority}${priorityEmoji}`,
+      '',
+      '<b>Due:</b>',
+      dueLine,
+      '',
+      '<b>Account:</b>',
+      user.email,
+    ].join('\n');
   }
 
   private async handleNewTask(
@@ -693,11 +771,7 @@ Example: <i>Call client tomorrow at 5pm high priority</i>
       return;
     }
 
-    void this.aiTaskService.logAiRequest(
-      user.id,
-      text,
-      JSON.stringify(parsed),
-    );
+    void this.aiTaskService.logAiRequest(user.id, text, JSON.stringify(parsed));
 
     switch (parsed.intent) {
       case AiTaskIntent.CREATE_TASK:
@@ -730,9 +804,7 @@ Example: <i>Call client tomorrow at 5pm high priority</i>
         if (parsed.taskRef && parsed.updates) {
           await this.handleUpdateTask(chatId, user, [
             parsed.taskRef,
-            ...Object.entries(parsed.updates).map(
-              ([k, v]) => `${k}=${v}`,
-            ),
+            ...Object.entries(parsed.updates).map(([k, v]) => `${k}=${v}`),
           ]);
         } else {
           await this.telegramApi.sendMessage(
@@ -857,10 +929,16 @@ Example: <i>Call client tomorrow at 5pm high priority</i>
 
     if (updates.title) dto.title = updates.title;
     if (updates.description) dto.description = updates.description;
-    if (updates.status && Object.values(TaskStatus).includes(updates.status as TaskStatus)) {
+    if (
+      updates.status &&
+      Object.values(TaskStatus).includes(updates.status as TaskStatus)
+    ) {
       dto.status = updates.status as TaskStatus;
     }
-    if (updates.priority && Object.values(TaskPriority).includes(updates.priority as TaskPriority)) {
+    if (
+      updates.priority &&
+      Object.values(TaskPriority).includes(updates.priority as TaskPriority)
+    ) {
       dto.priority = updates.priority as TaskPriority;
     }
 
